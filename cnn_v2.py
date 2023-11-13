@@ -7,12 +7,12 @@ class conv:
         self.F=filter
         # b.shape=(1,FN)
         self.b=bias
-        # data.shape=(N*OH*OW,FN) *OH: about single data
+        self.data=None
     def forward(self,data,batch_size,FH,FW,channel=3,stride=1,padding=0):
         # ready2dot: (N*H,W*C) => (N*OH*OW,C*FH*FW)
-        # self.data=ready2dot(data,stride,padding,FH,FW,channel,batch_size)
         self.data=ready2dot(data,batch_size,FH,FW,channel,stride,padding)
         ret=np.dot(data,self.F)+self.b
+        self.data=ret
         return ret
     def backward(self,diff_y,learning_rate=0.1):
         F-=learning_rate*np.dot(self.data.T,diff_y)
@@ -21,7 +21,6 @@ class conv:
         b-=learning_rate*temp
         return np.dot(diff_y,self.F.T)
 
-# if (OH-1)s+FH=H, clean
 def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
     ret=[]
     # data.shape=(N*H,W*C)
@@ -51,46 +50,38 @@ def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
 class relu:
     def __init__(self):
         self.mask=None
+    # data.type=np.array
     def forward(self,data):
-        self.mask=(data<=0)
-        ret=data.copy()
-        ret[self.mask]=0
-        return ret
+        self.mask=(data <= 0)
+        data[self.mask]=0
+        return data
     def backward(self,diff_y):
         diff_y[self.mask]=0
         return diff_y
 
 class pooling:
     def __init__(self,stride):
-        self.stride=stride
+        self.s=stride
         self.mask=[]
-    def forward(self,data):
-        ret=[]
-        H,W=data.shape
-        OH=int(H/self.stride)
-        OW=int(W/self.stride)
-        for i in range(OH):
-            # stride=FH,FW.size
-            temp=data[i*self.stride:(i+1)*self.stride]
-            for j in range(OW):
-                tmp2=temp[j*self.stride:(j+1)*self.stride]
-                max_val=max(tmp2)
-                # mask,shape=((H/s)*(W/s),s,s)
-                self.mask.append(tmp2<max_val)
-                ret.append(max_val)
-        self.mask.reshape(H,W)
-        return ret.reshape(OH,OW)
+    # using im2col
+    def forward(self,data,N):
+        NH,W=data.shape
+        OH=int(NH/self.s)
+        OW=int(W/self.s)
+        tmp=ready2dot(data,N,self.s,self.s,1,self.s,0)
+        ret=np.max(tmp,axis=1).reshape(OH,OW)
+        self.mask=np.argmax(tmp,axis=1) # mask.shape=(1,OHOW)
+        # ret.shape=(OH,OW)
+        return ret
     def backward(self,diff_y):
-        H,W=self.mask.shape
-        OH=int(H/self.stride)
-        OW=int(W/self.stride)
-        ret=np.ones(H,W)
-        for i in range(OH):
-            tmp=self.mask[i*self.stride:(i+1)*self.stride]
-            for j in range(OW):
-                tmp2=tmp[j*self.stride:(j+1)*self.stride]
-                ret[tmp2]=0
-                ret[not tmp2]=diff_y[i][j]
+        OH,OW=diff_y.shape
+        ss=self.s*self.s
+        OHOW=OH*OW
+        ret=np.ones(OHOW,ss)
+        diff_y=diff_y.reshape(1,OHOW)
+        for i in range(OHOW):
+            ret[i][self.mask[i]]=diff[i]
+        ret=ret.reshape(OH*self.s,OW*self.s)
         return ret
 
 class Affine:
@@ -115,7 +106,39 @@ class Affine:
         ret=y-np.dot(temp,self.W)*(-1*temp)
         return ret
 
-im1=cv2.imread('/project/python_project/carDetect/project/test_set/test_1.labled/1.[[(212, 216), (290, 290)], [(340, 205), (380, 248)], [(100, 197), (142, 231)]].dfec4efae9812bb6db3de0bf9ea8ab96d0a65d3b.jpg')
-im2=cv2.imread('/project/python_project/carDetect/project/train_set/train_1.labled/1.[[(155, 74), (563, 370)]].0b561d7ae41f9aeecfdbb9032021596d057c25c3.jpg')
-data=np.array([im1,im2])
-print(ready2dot(data.reshape(2*427,640*3),2,3,4,s=2,p=1).shape) # N,FH,FW,C,s,p
+class modelA:
+    def __init__(self,FH,FW,FN,ps):
+        filters=genFilters(FH,FW,FN)
+        bias=np.random()
+        self.conv=conv(filters,bias)
+        self.relu=relu()
+        self.pool=pooling()
+    # batch.shape=(N*H,W*C)
+    def forward(self,batch,N,FH,FW,C=3,s=1,p=1):
+        # x1.shape=(N*OH*OW,FN)
+        x1=self.conv.forward(batch,N,FH,FW,C,s,p)
+        x2=self.relu.forward(x1)
+        # ret.shape=(N*OH*OW/s,FN/s)
+        ret=self.pool.forward(x2)
+        return ret
+    # y.shape=(N*OH*OW/s,FN/s)
+    def backward(self,y,lr):
+        # y1.shape=(N*OH*OW,FN)
+        y1=self.pool.backward(y)
+        y2=self.relu.backward(y1)
+        # ret.shape=(N*OH*OW,C*FH*FW)
+        ret=self.conv.backward(y2,lr)
+        return ret
+
+def genFilters(FH,FW,FN):
+    tmp=np.random(FN,FH*FW)
+
+data='/project/python_project/carDetect/project/test_set/test_1.labled/1.[[(212, 216), (290, 290)], [(340, 205), (380, 248)], [(100, 197), (142, 231)]].dfec4efae9812bb6db3de0bf9ea8ab96d0a65d3b.jpg'
+re=relu()
+a=np.array([[1,2,3,-1],
+    [4,5,-1,6],
+    [1,3,4,5],
+    [0,-50,2,3]])
+p=pooling(2)
+print(re.forward(a))
+#print(p.forward(a,1))
