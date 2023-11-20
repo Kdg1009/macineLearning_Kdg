@@ -1,5 +1,6 @@
 import cnnLayers_v2 as layer
 import imgPreprocess
+import genConvNet
 import pickle as pkl
 # model structure: data->A->A->A->A->A(with no pool)->B->Affine->Loss
 batch=None
@@ -13,7 +14,7 @@ except:
     with open('pkl/mean.pickle','wb') as fw:
         mean=imgPreprocess.meanTotal(batch)
         pkl.dump(mean,fw)
-batch=imgPreprocess.zeromean(batch,mean,'total')
+batch=imgPreprocess.zeromean(batch,mean)
 # 2. Forward-> 2.1 evaluate loss value
 try:
     with open('pkl/modelA.pickle','rb') as fr:
@@ -26,7 +27,7 @@ except:
     A4=layer.modelA()
     A5=later.modelA()
     A=[A1,A2,A3,A4,A5]
-    pkl.dump(A,'pkl/modelA.pickle'.'wb')
+    pkl.dump(A,'pkl/modelA.pickle','wb')
 try:
     with open('pkl/modelB.pickle','rb') as fr:
         B=pkl.load(fr)
@@ -34,4 +35,12 @@ except:
     print('GEN: pkl/modelB.pickle')
     B=layer.modelB()
     pkl.dump(B,'pkl/modelB.pickle','wb')
+try:
+    with open('pkl/affine.pickle','rb') as fr:
+        affine=pkl.load(fr)
+except:
+    print('GEN: pkl/affine.pickle')
+    affine=layer.Affine()
+    pkl.dump(affine,'pkl/affine.pickle')
+neuralNet=genConvNet.genNet(A,B,affine)
 # 3. backward

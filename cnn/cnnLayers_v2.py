@@ -9,12 +9,14 @@ class conv:
         # b.shape=(1,FN)
         self.b=bias
         self.data=None
-    def forward(self,data,batch_size,FH,FW,channel=3,stride=1,padding=0):
+    def forward(self,data,N,FH,FW,channel=3,stride=1,padding=0):
+        NH,WC=data.shape
         # ready2dot: (N*H,W*C) => (N*OH*OW,C*FH*FW)
-        self.data=ready2dot(data,batch_size,FH,FW,channel,stride,padding)
+        OH,OW,data=ready2dot(data,N,FH,FW,channel,stride,padding)
         ret=np.dot(data,self.F)+self.b
-        self.data=ret
-        return ret
+        FN=self.F.shape[1]
+        self.data=ret.reshape(N*OH,OW*FN)
+        return self.data # data.shape=(N*OH,OW*FN)
     def backward(self,diff_y,learning_rate=0.1):
         F-=learning_rate*np.dot(self.data.T,diff_y)
         f=lambda x: x if len(x[0])==1 else x[0]+f(x[1:])
@@ -43,8 +45,8 @@ def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
             for k in range(0,kLoop,s*C):
                 tmp3=tmp2[k:k+FW*C]
                 ret.append(tmp3)
-    ret=np.array(ret).transpose(0,2,1)
-    return ret.reshape(N*OH*OW,FH*FW*C)
+    ret=np.array(ret).transpose(0,2,1).reshape(N*OH*OW,FH*FW*C)
+    return OH,OW,ret
 
 class relu:
     def __init__(self):
@@ -53,7 +55,7 @@ class relu:
     def forward(self,data):
         self.mask=(data <= 0)
         data[self.mask]=0
-        return data
+        return np.array(data)
     def backward(self,diff_y):
         diff_y[self.mask]=0
         return diff_y
@@ -61,49 +63,51 @@ class relu:
 class pooling:
     def __init__(self,stride):
         self.s=stride
-        self.mask=None # (1,NOHOW/ss*FN)
+        self.mask=None #mask.shape=(N*OH/s*OW/s,FN)
+        self.ss=stride**2
     # using im2col
-    def forward(self,data,N):
-        NOHOW,FN=data.shape
-        ss=self.s**2
-        OHOW=int(NOHOW/N)
-        tmp=ready2dot(data,N,ss,FN,C=1,s=ss).reshape(-1,ss,FN).transpose(0,2,1).reshape(-1,ss) # tmp.shape=(NOHOW/ss*FN,ss)
-        ret=np.max(tmp,axis=1).reshape(-1,FN) #(NOHOW/ss,FN)
-        self.mask=np.argmax(tmp,axis=1).reshape(-1,FN) #(NOHOW/ss,FN)
-        return ret # ret.shape=(NOHOW/ss,FN)
-    def backward(self,diff_y): # diff_y.shape=(NOHOW/ss,FN)
-        H,FN=diff_y.shape
-        ss=self.s**2
-        tmp=np.zeros(H*ss*FN,dtype='float64') #shape(1,H*ss*FN)
-        tmp2=diff_y.T.reshape(1,-1) #shape(1,H*FN)
-        mask=self.mask.T.reshape(1,-1) #shape(1,H*FN)
-        for i in range(H*FN):
-            tmp[i*ss+mask[0][i]]=tmp2[0][i]
-        ret=tmp.reshape(FN,H*ss).T
+    def forward(self,data,N,FN):
+        NOH,OWFN=data.shape
+        OH,OW,tmp=ready2dot(data,N,self.s,self.s,FN,self.s,0)
+        tmp=tmp.reshape((-1,self.ss,FN)) # tmp.shape=(N*OH/s*OW/s,ss,FN)
+        ret=np.max(tmp,axis=1)
+        ret=ret.reshape(-1,OW*FN) # ret.shape=(N*OH/s,OW/s*FN)
+        self.mask=np.argmax(tmp,axis=1).reshape(-1,FN)
         return ret
 
+    def backward(self,diff_y,FN): # diff_y.shape=(N*OH/s,OW/s*FN)
+        H,W=diff_y.shape
+        tmp=np.zeros(self.ss,H*W) #tmp.shape=(ss,N*OHOW/ss*FN)
+        tmp2=diff_y.reshape(1,-1) #tmp2.shape=(1,N*OHOW/ss*FN)
+        for i in range(H*W):
+            tmp[tmp2[int(i/FN)][int(i%FN)]][i]=tmp2[0][i]
+        #tmp.shape=(NOH,OWFN)
+        tmp3=tmp.T
+        ret=[]
+        for i in range(0,H*W,FN):
+            tmp4=np.array(tmp3[i:i+FN]).reshape(self.s,-1)
+            ret.append(tmp4)
+        ret=np.array(ret).reshape(H*self.s,W*self.s) #(NOHOW/ss*s,FN*s)=>(NOH,OWFN)
+        return ret
 class Affine:
     def __init__(self,W,b):
-        # batch.shape=(N*BH,BW)=>(N,BH*BW)
+        # batch.shape=(N*BH,BW*FN)|(N,M)
         self.batch=None
-        # W.shape=(BH*BW,FN)
+        # W.shape=(BH*BW*FN,M)
         self.W=W
-        # b.shape=(1,FN)
+        # b.shape=(1,M)
         self.b=b
-    def forward(self,batch,N):
+    def forward(self,batch,N): # output.shape=(1,N) output has to be an vector
         self.batch=batch
         ret=np.dot(batch.reshape(N,-1),self.W)+self.b
-        return ret
+        return ret #ret.shape=(N,M)
     def backward(self,diff_y,N,learning_rate=0.1):
         self.b-=learning_rate*diff_y
-        self.W-=learning_rate*np.dot(self.batch.T,diff_y)
-        return np.dot(diff_y,self.W.T).reshape(self.batch.shape[0],-1)
-    def lossGrad(self,y):
-        # y.shape=(N,H*W), x*W.shape=(N,FN)
-        temp=self.batch.reshape(y.shape[0],-1)
-        ret=y-np.dot(temp,self.W)*(-1*temp)
-        return ret
-
+        self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
+        return np.dot(diff_y,self.W.T).reshape(self.batch.shape)
+def Loss(predict,answer):
+    
+    return
 class modelA:
     def __init__(self,FN,FH,FW,C,ps):
         filters=self.genFilters(FN,FH,FW,C) # for each channels, F init identical, but by doing gradient descent, execute separately
@@ -112,17 +116,17 @@ class modelA:
         self.relu=relu()
         self.pool=pooling(ps)
     # batch.shape=(N*H,W*C)
-    def forward(self,batch,N,FH,FW,C=3,s=1,p=1):
+    def forward(self,batch,N,FH,FW,C=3,s=1,p=0):
         # x1.shape=(N*OH*OW,FN)
         x1=self.conv.forward(batch,N,FH,FW,C,s,p)
         x2=self.relu.forward(x1)
         # ret.shape=(N*OH*OW/s,FN/s)
-        ret=self.pool.forward(x2,N)
+        ret=self.pool.forward(x2,N,self.conv.F.shape[1])
         return ret
     # y.shape=(N*OH*OW/s,FN/s)
     def backward(self,y,lr=0.1):
         # y1.shape=(N*OH*OW,FN)
-        y1=self.pool.backward(y)
+        y1=self.pool.backward(y,self.conv.F.shape[1])
         y2=self.relu.backward(y1)
         # ret.shape=(N*OH*OW,C*FH*FW)
         ret=self.conv.backward(y2,lr)
@@ -134,9 +138,9 @@ class modelA:
         return ret
 
 class modelB:
-    def __init__(self,BHBW,FN):
-        filters=self.genFilters(FN,BHBW)
-        b=np.zeros(1,FN)
+    def __init__(self,BHBWFN,M):
+        filters=self.genFilters(M,BHBWFN)
+        b=np.zeros(1,M)
         self.aff=Affine(filters,b)
         self.relu=relu()
     def forward(self,batch,N):
@@ -150,9 +154,3 @@ class modelB:
     def genFilters(self,FN,BHBW):
         ret=np.random.randn(BHBW,FN)*math(1/BHBW)
         return ret
-
-a=np.array([[1,9,17],[2,10,18],[3,12,19],[4,11,20],[5,13,21],[6,14,22],[7,15,23],[8,16,24]])
-b=np.array([[4,12,20],[8,16,24]])
-p=pooling(2)
-print(p.forward(a,1))
-print(p.backward(b))
