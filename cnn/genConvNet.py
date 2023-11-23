@@ -24,6 +24,9 @@ W=np.tile([1,2],(8,1))
 affine=cnn.Affine(W,np.zeros(2))
 x4=affine.forward(x3,2)
 print(x4)
+answer=[[4960,9940],[4961,9939]]
+L=cnn.Loss(x4,answer)
+print(L)
 class genNet:
     def __init__(self,A,B,affine):
         self.A=A

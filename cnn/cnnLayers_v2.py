@@ -105,9 +105,25 @@ class Affine:
         self.b-=learning_rate*diff_y
         self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
         return np.dot(diff_y,self.W.T).reshape(self.batch.shape)
-def Loss(predict,answer):
-    
-    return
+class LossSSE:
+    def __init__(self):
+        self.loss=None
+        self.N=None
+        self.W=None
+    def forward(t,y):
+        N,W=t.shape
+        self.N=N
+        self.W=W
+        self.loss=y-t
+        ret=self.loss
+        ret=np.sum(ret*ret,axis=1)
+        return ret/2
+    def backward(dy): # dy.shape=(N,1)
+        ret=np.repeat(dy,(1,W))
+        ret=ret*self.loss
+        return ret
+    def grad(y):
+
 class modelA:
     def __init__(self,FN,FH,FW,C,ps):
         filters=self.genFilters(FN,FH,FW,C) # for each channels, F init identical, but by doing gradient descent, execute separately
