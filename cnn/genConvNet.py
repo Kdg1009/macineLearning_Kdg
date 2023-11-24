@@ -28,23 +28,20 @@ answer=[[4960,9940],[4961,9939]]
 L=cnn.Loss(x4,answer)
 print(L)
 class genNet:
-    def __init__(self,A,B,affine):
+    def __init__(self,A,B,C,answer):
         self.A=A
         self.B=B
-        self.affine=affine
-    def forward(self,batch,N,FH,FW,C=3,s=1,p=0):
+        self.C=C
+    def forward(self,answer,batch,N,FH,FW,C=3,s=1,p=0):
         N,H,W,C=batch.shape
         x=batch.reshape(N*H,W*C)
         for layer in self.A:
             x=layer.forward(x,N,FH,FW,C,s,p)
         x=self.B.forward(x,N)
-        x=self.affine.forward(x,N)
-        # loss func
-        # ret=loss(x,N)
-        # return ret
-    def backward(self,dy,N,lr):
-        y=self.affine.backward(dy,N,lr)
-        y=self.B.backward(y,N,lr)
+        L=self.C.forward(answer,x,N)
+        return L
+    def backward(self,N,optimizer,lr):
+        dL=self.C.backward(N,optimizer,lr)
+        dL=self.B.backward(dL,N,optimizer,lr)
         for layer in self.A:
-            y=layer.backward(y,lr)
-            return y
+            dL=layer.backward(dL,optimizer,lr)

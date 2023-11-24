@@ -18,12 +18,12 @@ class conv:
         self.data=ret.reshape(N*OH,OW*FN)
         return self.data # data.shape=(N*OH,OW*FN)
     def backward(self,diff_y,learning_rate=0.1):
-        F-=learning_rate*np.dot(self.data.T,diff_y)
+        #F-=learning_rate*np.dot(self.data.T,diff_y)
+        # ave b
         f=lambda x: x if len(x[0])==1 else x[0]+f(x[1:])
         temp=f(diff_y)/diff_y.shape[0]
         b-=learning_rate*temp
-        return np.dot(diff_y,self.F.T)
-
+        return np.dot(diff_y,self.F.T), np.dot(self.data.T,diff_y)
 def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
     ret=[]
     # data.shape=(N*H,W*C)
@@ -47,7 +47,6 @@ def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
                 ret.append(tmp3)
     ret=np.array(ret).transpose(0,2,1).reshape(N*OH*OW,FH*FW*C)
     return OH,OW,ret
-
 class relu:
     def __init__(self):
         self.mask=None
@@ -59,7 +58,6 @@ class relu:
     def backward(self,diff_y):
         diff_y[self.mask]=0
         return diff_y
-
 class pooling:
     def __init__(self,stride):
         self.s=stride
@@ -74,7 +72,6 @@ class pooling:
         ret=ret.reshape(-1,OW*FN) # ret.shape=(N*OH/s,OW/s*FN)
         self.mask=np.argmax(tmp,axis=1).reshape(-1,FN)
         return ret
-
     def backward(self,diff_y,FN): # diff_y.shape=(N*OH/s,OW/s*FN)
         H,W=diff_y.shape
         tmp=np.zeros(self.ss,H*W) #tmp.shape=(ss,N*OHOW/ss*FN)
@@ -91,20 +88,20 @@ class pooling:
         return ret
 class Affine:
     def __init__(self,W,b):
-        # batch.shape=(N*BH,BW*FN)|(N,M)
+        # batch.shape=(N*BH,BW*FN)
         self.batch=None
         # W.shape=(BH*BW*FN,M)
         self.W=W
         # b.shape=(1,M)
         self.b=b
-    def forward(self,batch,N): # output.shape=(1,N) output has to be an vector
+    def forward(self,batch,N):
         self.batch=batch
         ret=np.dot(batch.reshape(N,-1),self.W)+self.b
-        return ret #ret.shape=(N,M)
+        return ret
     def backward(self,diff_y,N,learning_rate=0.1):
         self.b-=learning_rate*diff_y
-        self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
-        return np.dot(diff_y,self.W.T).reshape(self.batch.shape)
+        #self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
+        return np.dot(diff_y,self.W.T).reshape(self.batch.shape),np.dot(self.batch.reshape(N,-1).T,diff_y)
 class LossSSE:
     def __init__(self):
         self.loss=None
@@ -122,8 +119,6 @@ class LossSSE:
         ret=np.repeat(dy,(1,W))
         ret=ret*self.loss
         return ret
-    def grad(y):
-
 class modelA:
     def __init__(self,FN,FH,FW,C,ps):
         filters=self.genFilters(FN,FH,FW,C) # for each channels, F init identical, but by doing gradient descent, execute separately
@@ -140,19 +135,19 @@ class modelA:
         ret=self.pool.forward(x2,N,self.conv.F.shape[1])
         return ret
     # y.shape=(N*OH*OW/s,FN/s)
-    def backward(self,y,lr=0.1):
+    def backward(self,y,optimizer,lr=0.1):
         # y1.shape=(N*OH*OW,FN)
         y1=self.pool.backward(y,self.conv.F.shape[1])
         y2=self.relu.backward(y1)
         # ret.shape=(N*OH*OW,C*FH*FW)
-        ret=self.conv.backward(y2,lr)
-        return ret
+        dx,dF=self.conv.backward(y2,lr)
+        optimizer.update(self.conv.F,dF)
+        return dx
     def genFilters(FN,FH,FW,C=3): # using He init
         # F.shape=(C*FH*FW,FN)
         tmp=np.random.randn(FN,FH*FW)*math.sqrt(2.0/FH*FW) # N=FH*FW
         ret=np.repeat(tmp,repeats=C,axis=1).T
         return ret
-
 class modelB:
     def __init__(self,BHBWFN,M):
         filters=self.genFilters(M,BHBWFN)
@@ -163,10 +158,37 @@ class modelB:
         tmp=self.aff.forward(batch,N)
         ret=self.relu.forward(tmp)
         return ret
-    def backward(self,diff_y,N,lr=0.1):
-        tmp=self.relu.backward(diff_y)
-        ret=self.aff.backward(diff_y,N,learning_rate=lr)
+    def backward(self,diff_y,N,optimizer,lr):
+        dy=self.relu.backward(diff_y)
+        dx,dw=self.aff.backward(dy,N,lr)
+        optimizer.update(self.aff.W,dw)
+        return dx
+    def genFilters(self,FN,BHBW):
+        ret=np.random.randn(BHBW,FN)*math(1/BHBW)
         return ret
+class modelC:
+    def __init__(self,W,M):
+        filters=self.genFilters(M,W)
+        b=np.zeros(1,M)
+        self.aff=Affine(filters,b)
+        self.loss=LossSSE()
+        self.y=None
+        self.xw=None
+        self.x=None
+    def forward(self,answer,batch,N):
+        tmp=self.aff.forward(batch,N)
+        ret=self.loss.forward(tmp,answer)
+        self.x=batch
+        self.y=answer
+        self.xw=tmp
+        return ret
+    def backward(self,N,optimizer,lr):
+        dy=self.y-self.xw
+        dy=dy*self.x
+        dy=dy*-1
+        dx,dw=self.aff.backward(dy,N,lr)
+        optimizer.update(self.aff.W,dw)
+        return dx
     def genFilters(self,FN,BHBW):
         ret=np.random.randn(BHBW,FN)*math(1/BHBW)
         return ret
