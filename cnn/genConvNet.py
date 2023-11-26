@@ -1,32 +1,3 @@
-import numpy as np
-import cnnLayers_v2 as cnn
-import imgPreprocess as img
-F=np.ones((27,2),dtype='float64')
-b=np.zeros((1,2),dtype='float64')
-conv=cnn.conv(F,b)
-re=cnn.relu()
-pool=cnn.pooling(2)
-# data.shape=(2,6,6,3)
-data=np.arange(1,37,dtype='float64')
-data2=data+1
-data3=data2+1
-data=np.concatenate((data,data2,data3)).reshape(3,36).T
-data=np.tile(data,(2,1))
-data=data.reshape(2*6,6*3)
-print(data)
-x1=conv.forward(data,2,3,3,3,1,0)
-print(x1)
-x2=re.forward(x1)
-print(x2)
-x3=pool.forward(x2,2,2)
-print(x3)
-W=np.tile([1,2],(8,1))
-affine=cnn.Affine(W,np.zeros(2))
-x4=affine.forward(x3,2)
-print(x4)
-answer=[[4960,9940],[4961,9939]]
-L=cnn.Loss(x4,answer)
-print(L)
 class genNet:
     def __init__(self,A,B,C,answer):
         self.A=A
@@ -40,8 +11,8 @@ class genNet:
         x=self.B.forward(x,N)
         L=self.C.forward(answer,x,N)
         return L
-    def backward(self,N,optimizer,lr):
-        dL=self.C.backward(N,optimizer,lr)
-        dL=self.B.backward(dL,N,optimizer,lr)
-        for layer in self.A:
-            dL=layer.backward(dL,optimizer,lr)
+    def backward(self,N,optA,optB,optC,N,InfoA,lr):
+        dL=self.C.backward(N,optC,lr)
+        dL=self.B.backward(dL,N,B,lr)
+        for i in len(self.A):
+            dL=self.A[i].backward(dL,optA[i],N,InfoA[i],lr)

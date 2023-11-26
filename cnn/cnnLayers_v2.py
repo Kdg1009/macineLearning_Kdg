@@ -4,41 +4,42 @@ import math
 
 class conv:
     def __init__(self,filter,bias):
-        # F.shape=(C*FH*FW,FN)
-        self.F=filter
-        # b.shape=(1,FN)
-        self.b=bias
-        self.data=None
-    def forward(self,data,N,FH,FW,channel=3,stride=1,padding=0):
+        self.F=filter   # F.shape=(C*FH*FW,FN)
+        self.b=bias     # b.shape=(1,FN)
+        self.data=None  # data.shape=(NOHOW,CFHFW)
+    def forward(self,data,N,FH,FW,channel=3,stride=1,padding=((0,0),(0,0))):
         NH,WC=data.shape
-        # ready2dot: (N*H,W*C) => (N*OH*OW,C*FH*FW)
-        OH,OW,data=ready2dot(data,N,FH,FW,channel,stride,padding)
+        OH,OW,data=ready2dot(data,N,FH,FW,channel,stride,padding) # ready2dot: (NH,WC) => (NOHOW,CFHFW)
         ret=np.dot(data,self.F)+self.b
         FN=self.F.shape[1]
-        self.data=ret.reshape(N*OH,OW*FN)
-        return self.data # data.shape=(N*OH,OW*FN)
-    def backward(self,diff_y,learning_rate=0.1):
-        #F-=learning_rate*np.dot(self.data.T,diff_y)
+        self.data=data   # data.shape=(NOHOW,CFHFW)
+        return ret.reshape(N*OH,OW*FN) 
+    def backward(self,dy,learning_rate=0.1):
+        dy=dy.reshape(-1,self.F.shape[1])           # dy.shape=(NOH,OWFN)=>(NOHOW,FN)
         # ave b
-        f=lambda x: x if len(x[0])==1 else x[0]+f(x[1:])
-        temp=f(diff_y)/diff_y.shape[0]
-        b-=learning_rate*temp
-        return np.dot(diff_y,self.F.T), np.dot(self.data.T,diff_y)
-def ready2dot(data,N,FH,FW,C=3,s=1,p=0):
+        db=np.sum(dy,axis=0)/self.b.shape[1]
+        self.b-=learning_rate*db
+        # dx,dw
+        dx=np.dot(dy,self.F.T) # dx.shape=(NOHOW,CFHFW)
+        dF=np.dot(self.data.T,dy) #dF.shape=(CFHFW,FN)
+        return dx,dF
+def ready2dot(data,N,FH,FW,C=3,s=1,p=((0,0),(0,0))):
     ret=[]
     # data.shape=(N*H,W*C)
     NH,WC=data.shape
     # split data into N
     H=int(NH/N)
     W=int(WC/C)
-    OH=int((H-FH+2*p)/s)+1
-    OW=int((W-FW+2*p)/s)+1
-    jLoop=H+2*p-FH+1
-    kLoop=WC+C*(2*p-FW)+1
+    pcol=p[0][0]+p[0][1]
+    prow=p[1][0]+p[1][1]
+    OH=int((H-FH+pcol)/s)+1
+    OW=int((W-FW+prow)/s)+1
+    jLoop=H+pcol-FH+1
+    kLoop=WC+C*(prow-FW)+1
     for i in range(0,NH,H): # loop N
         tmp=data[i:i+H] # tmp.shape=(H,WC)
         # add padding
-        tmp=np.pad(tmp,p,mode='constant')
+        tmp=np.pad(tmp,((p[0][0],p[0][1]),(C*p[1][0],C*p[1][1])),mode='constant')
         # modify to shape(OH,OW)
         for j in range(0,jLoop,s):
             tmp2=np.array(tmp[j:j+FH]).T
@@ -63,21 +64,27 @@ class pooling:
         self.s=stride
         self.mask=None #mask.shape=(N*OH/s*OW/s,FN)
         self.ss=stride**2
+        self.pad=None
     # using im2col
     def forward(self,data,N,FN):
         NOH,OWFN=data.shape
-        OH,OW,tmp=ready2dot(data,N,self.s,self.s,FN,self.s,0)
+        OH=int(NOH/N)
+        OW=int(OWFN/FN)
+        pcol=int((self.s-OH%self.s)%self.s)
+        prow=int((self.s-OW%self.s)%self.s)
+        self.pad=(N*pcol,FN*prow)
+        OH,OW,tmp=ready2dot(data,N,self.s,self.s,FN,self.s,((0,pcol),(0,prow)))
         tmp=tmp.reshape((-1,self.ss,FN)) # tmp.shape=(N*OH/s*OW/s,ss,FN)
         ret=np.max(tmp,axis=1)
         ret=ret.reshape(-1,OW*FN) # ret.shape=(N*OH/s,OW/s*FN)
         self.mask=np.argmax(tmp,axis=1).reshape(-1,FN)
         return ret
-    def backward(self,diff_y,FN): # diff_y.shape=(N*OH/s,OW/s*FN)
-        H,W=diff_y.shape
-        tmp=np.zeros(self.ss,H*W) #tmp.shape=(ss,N*OHOW/ss*FN)
-        tmp2=diff_y.reshape(1,-1) #tmp2.shape=(1,N*OHOW/ss*FN)
+    def backward(self,dy,FN): # dy.shape=(N*OH/s,OW/s*FN)
+        H,W=dy.shape
+        tmp=np.zeros((self.ss,H*W)) #tmp.shape=(ss,N*OHOW/ss*FN)
+        tmp2=dy.reshape(1,-1) #tmp2.shape=(1,N*OHOW/ss*FN)
         for i in range(H*W):
-            tmp[tmp2[int(i/FN)][int(i%FN)]][i]=tmp2[0][i]
+            tmp[self.mask[int(i/FN)][int(i%FN)]][i]=tmp2[0][i]
         #tmp.shape=(NOH,OWFN)
         tmp3=tmp.T
         ret=[]
@@ -85,7 +92,7 @@ class pooling:
             tmp4=np.array(tmp3[i:i+FN]).reshape(self.s,-1)
             ret.append(tmp4)
         ret=np.array(ret).reshape(H*self.s,W*self.s) #(NOHOW/ss*s,FN*s)=>(NOH,OWFN)
-        return ret
+        return ret[:-self.pad[0],:-self.pad[1]]
 class Affine:
     def __init__(self,W,b):
         # batch.shape=(N*BH,BW*FN)
@@ -98,16 +105,18 @@ class Affine:
         self.batch=batch
         ret=np.dot(batch.reshape(N,-1),self.W)+self.b
         return ret
-    def backward(self,diff_y,N,learning_rate=0.1):
-        self.b-=learning_rate*diff_y
+    def backward(self,dy,N,learning_rate=0.1):
+        #self.b-=learning_rate*diff_y
+        db=np.sum(dy,axis=0)/self.b.shape[1]
+        self.b-=learning_rate*db
         #self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
-        return np.dot(diff_y,self.W.T).reshape(self.batch.shape),np.dot(self.batch.reshape(N,-1).T,diff_y)
+        return np.dot(dy,self.W.T).reshape(self.batch.shape),np.dot(self.batch.reshape(N,-1).T,dy)
 class LossSSE:
     def __init__(self):
         self.loss=None
         self.N=None
         self.W=None
-    def forward(t,y):
+    def forward(self,t,y):
         N,W=t.shape
         self.N=N
         self.W=W
@@ -115,61 +124,76 @@ class LossSSE:
         ret=self.loss
         ret=np.sum(ret*ret,axis=1)
         return ret/2
-    def backward(dy): # dy.shape=(N,1)
+    def backward(self,dy): # dy.shape=(N,1)
         ret=np.repeat(dy,(1,W))
         ret=ret*self.loss
         return ret
 class modelA:
-    def __init__(self,FN,FH,FW,C,ps):
+    def __init__(self,FN,FH,FW,C,pstride):
         filters=self.genFilters(FN,FH,FW,C) # for each channels, F init identical, but by doing gradient descent, execute separately
         bias=np.zeros((1,FN))
         self.conv=conv(filters,bias)
         self.relu=relu()
-        self.pool=pooling(ps)
-    # batch.shape=(N*H,W*C)
-    def forward(self,batch,N,FH,FW,C=3,s=1,p=0):
-        # x1.shape=(N*OH*OW,FN)
-        x1=self.conv.forward(batch,N,FH,FW,C,s,p)
+        self.pool=pooling(pstride)
+    def forward(self,batch,N,FH,FW,C=3,s=1,p=((0,0),(0,0))):        # batch.shape=(N*H,W*C)
+        x1=self.conv.forward(batch,N,FH,FW,C,s,p)       # x1.shape=(N*OH*OW,FN)
         x2=self.relu.forward(x1)
-        # ret.shape=(N*OH*OW/s,FN/s)
-        ret=self.pool.forward(x2,N,self.conv.F.shape[1])
+        ret=self.pool.forward(x2,N,self.conv.F.shape[1])# ret.shape=(N*OH*OW/s,FN/s)
         return ret
-    # y.shape=(N*OH*OW/s,FN/s)
-    def backward(self,y,optimizer,lr=0.1):
-        # y1.shape=(N*OH*OW,FN)
-        y1=self.pool.backward(y,self.conv.F.shape[1])
+    def backward(self,y,optimizer,N,InfoA,lr=0.1):      # y.shape=(N*OH*OW/s,FN/s)
+        dxShape,FH,FW,C,s,p=InfoA
+        y1=self.pool.backward(y,self.conv.F.shape[1])   # y1.shape=(N*OH*OW,FN)
         y2=self.relu.backward(y1)
-        # ret.shape=(N*OH*OW,C*FH*FW)
         dx,dF=self.conv.backward(y2,lr)
         optimizer.update(self.conv.F,dF)
-        return dx
-    def genFilters(FN,FH,FW,C=3): # using He init
-        # F.shape=(C*FH*FW,FN)
+        return self.col2im(dx,dxShape,N,FH,FW,C,s,p)    # dx.shape=(NH,WC)
+    def genFilters(self,FN,FH,FW,C=3): # using He init / F.shape=(C*FH*FW,FN)
         tmp=np.random.randn(FN,FH*FW)*math.sqrt(2.0/FH*FW) # N=FH*FW
         ret=np.repeat(tmp,repeats=C,axis=1).T
         return ret
+    def col2im(self,batch,dxShape,N,FH,FW,C=3,s=1,p=((0,0),(0,0))):
+        NH,WC=dxShape
+        NOHOW,CFHFW=batch.shape
+        OHOW=int(NOHOW/N)
+        H=int(NH/N)
+        W=int(WC/C)
+        pcol=p[0][0]+p[0][1]
+        prow=p[1][0]+p[1][1]
+        dx=np.zeros((NH+pcol*N,WC+prow*C))    # dx.shape=(N(H+pcol),C(W+prow))
+        OH=int((H-FH+pcol)/s)+1
+        OW=int((W-FW+prow)/s)+1
+        for i in range(N):
+            batTmp=batch[i*OHOW:(i+1)*OHOW]
+            dxTmp=dx[i*(H+pcol):(i+1)*(H+pcol)]
+            for j in range(0,OHOW,s):
+                col=int(j/OW)
+                row=int(j%OW)
+                dxTmp[col:col+FH,row*C:C*(row+FW)]+=batTmp[j].reshape(FH,-1)
+        dx=dx.reshape(N,H+pcol,-1)
+        dx=dx[:,p[0][0]:-p[0][1],C*p[1][0]:-1*C*p[1][1]]
+        return dx.reshape(NH,WC)
 class modelB:
     def __init__(self,BHBWFN,M):
-        filters=self.genFilters(M,BHBWFN)
-        b=np.zeros(1,M)
+        filters=self.genFilters(BHBWFN,M)
+        b=np.zeros((1,M))
         self.aff=Affine(filters,b)
         self.relu=relu()
     def forward(self,batch,N):
         tmp=self.aff.forward(batch,N)
         ret=self.relu.forward(tmp)
         return ret
-    def backward(self,diff_y,N,optimizer,lr):
-        dy=self.relu.backward(diff_y)
+    def backward(self,dy,N,optimizer,lr=0.01):
+        dy=self.relu.backward(dy)
         dx,dw=self.aff.backward(dy,N,lr)
         optimizer.update(self.aff.W,dw)
         return dx
-    def genFilters(self,FN,BHBW):
-        ret=np.random.randn(BHBW,FN)*math(1/BHBW)
+    def genFilters(self,BHBW,FN):
+        ret=np.random.randn(BHBW,FN)*math.sqrt(1/BHBW)
         return ret
 class modelC:
     def __init__(self,W,M):
-        filters=self.genFilters(M,W)
-        b=np.zeros(1,M)
+        filters=self.genFilters(W,M)
+        b=np.zeros((1,M))
         self.aff=Affine(filters,b)
         self.loss=LossSSE()
         self.y=None
@@ -182,13 +206,11 @@ class modelC:
         self.y=answer
         self.xw=tmp
         return ret
-    def backward(self,N,optimizer,lr):
+    def backward(self,N,optimizer,lr=0.01):
         dy=self.y-self.xw
-        dy=dy*self.x
-        dy=dy*-1
         dx,dw=self.aff.backward(dy,N,lr)
-        optimizer.update(self.aff.W,dw)
-        return dx
-    def genFilters(self,FN,BHBW):
-        ret=np.random.randn(BHBW,FN)*math(1/BHBW)
+        optimizer.update(self.aff.W,-1*dw)
+        return -1*dx
+    def genFilters(self,BHBW,FN):
+        ret=np.random.randn(BHBW,FN)*math.sqrt(1/BHBW)
         return ret

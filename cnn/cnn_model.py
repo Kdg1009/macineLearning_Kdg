@@ -2,7 +2,9 @@ import cnnLayers_v2 as layer
 import imgPreprocess
 import genConvNet
 import pickle as pkl
+import optimizer as opt
 # model structure: data->A->A->A->A->A(with no pool)->B->Affine->Loss
+answer=None
 batch=None
 N,H.W,C=batch.shape
 # 1. Data Preprocessing
@@ -18,7 +20,7 @@ batch=imgPreprocess.zeromean(batch,mean)
 # 2. updating W
 try:
     with open('pkl/modelA.pickle','rb') as fr:
-        A=pkl.load(fr)
+        A,optA=pkl.load(fr)
 except FileNotFoundError:
     print('GEN: pkl/modelA.pickle')
     A1=layer.modelA()
@@ -27,23 +29,30 @@ except FileNotFoundError:
     A4=layer.modelA()
     A5=later.modelA()
     A=[A1,A2,A3,A4,A5]
-    pkl.dump(A,'pkl/modelA.pickle','wb')
+    optA1=opt.AdaGrad()
+    optA2=opt.AdaGrad()
+    optA3=opt.AdaGrad()
+    optA4=opt.AdaGrad()
+    optA5=opt.AdaGrad()
+    optA=[optA1,optA2,optA3,optA4,optA5]
+    pkl.dump([A,opt],'pkl/modelA.pickle','wb')
 try:
     with open('pkl/modelB.pickle','rb') as fr:
-        B=pkl.load(fr)
+        B,optB=pkl.load(fr)
 except FileNotFoundError:
     print('GEN: pkl/modelB.pickle')
     B=layer.modelB()
-    pkl.dump(B,'pkl/modelB.pickle','wb')
+    optB=opt.AdaGrad()
+    pkl.dump([B,optB],'pkl/modelB.pickle','wb')
 try:
     with open('pkl/modelC.pickle','rb') as fr:
-        C=pkl.load(fr)
+        C,optC=pkl.load(fr)
 except FileNotFoundError:
     print('GEN: pkl/modelC.pickle')
     C=layer.modelC()
-    pkl.dump(C,'pkl/modelC.pickle')
-answer=None
+    optC=opt.AdaGrad()
+    pkl.dump([C,optC],'pkl/modelC.pickle')
 neuralNet=genConvNet.genNet(A,B,C,answer)
 for i in range(1000):
     L=neuralNet.forward(answer,batch,N,5,5,3,1,0)
-    neuralNet.backward(N)
+    neuralNet.backward(N,optA,optB,optC,0.01)
