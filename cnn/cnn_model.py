@@ -52,7 +52,11 @@ except FileNotFoundError:
     C=layer.modelC()
     optC=opt.AdaGrad()
     pkl.dump([C,optC],'pkl/modelC.pickle')
-neuralNet=genConvNet.genNet(A,B,C,answer)
+neuralNet=genConvNet.genNet(A,B,C)
+infoA=[]
 for i in range(1000):
-    L=neuralNet.forward(answer,batch,N,5,5,3,1,0)
-    neuralNet.backward(N,optA,optB,optC,0.01)
+    L=neuralNet.forward(answer,batch,N,infoA)
+    print('L(',i,'): ',L)
+    if L < 0.01:
+        break
+    neuralNet.backward(N,optA,optB,optC,infoA,0.01)

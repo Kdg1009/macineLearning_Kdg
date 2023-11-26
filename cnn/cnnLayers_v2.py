@@ -56,9 +56,9 @@ class relu:
         self.mask=(data <= 0)
         data[self.mask]=0
         return np.array(data)
-    def backward(self,diff_y):
-        diff_y[self.mask]=0
-        return diff_y
+    def backward(self,dy):
+        dy[self.mask]=0
+        return dy
 class pooling:
     def __init__(self,stride):
         self.s=stride
@@ -92,7 +92,14 @@ class pooling:
             tmp4=np.array(tmp3[i:i+FN]).reshape(self.s,-1)
             ret.append(tmp4)
         ret=np.array(ret).reshape(H*self.s,W*self.s) #(NOHOW/ss*s,FN*s)=>(NOH,OWFN)
-        return ret[:-self.pad[0],:-self.pad[1]]
+        if self.pad[0]>0 and self.pad[1]>0:
+            return ret[:-self.pad[0],:-self.pad[1]]
+        elif self.pad[0]>0 and self.pad[1]==0:
+            return ret[:-self.pad[0],:]
+        elif self.pad[0]==0 and self.pad[1]>0:
+            return ret[:,:-self.pad[1]]
+        else:
+            return ret
 class Affine:
     def __init__(self,W,b):
         # batch.shape=(N*BH,BW*FN)
