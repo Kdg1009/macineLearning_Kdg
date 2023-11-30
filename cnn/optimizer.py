@@ -39,7 +39,7 @@ class Adam:
             self.h=np.zeros(params.shape)
         self.t+=1
         self.m=self.b1*self.m+(1-self.b1)*grads
-        self.h=self.b2*self.h+(1-self.h)*grads*grads
+        self.h=self.b2*self.h+(1-self.b2)*grads*grads
         mb=self.m/(1-self.b1**self.t)
         mh=self.h/(1-self.b2**self.t)
         params-=self.lr*mb/(np.sqrt(mh)+self.e)

@@ -17,7 +17,7 @@ InfoA=[[(427,1920),7,7,3,3,((1,1),(1,1))],] # dxShape,FH,FW,C,s,p
 singleNet=genNet([A,],B,C)
 for i in range(1000):
     L=singleNet.forward(answer,data,1,InfoA)
-    print(data.shape)
+    print(L)
     #print('L(',i,'): ',L)
     if L<0.01:
         break
