@@ -92,14 +92,7 @@ class pooling:
             tmp4=np.array(tmp3[i:i+FN]).reshape(self.s,-1)
             ret.append(tmp4)
         ret=np.array(ret).reshape(H*self.s,W*self.s) #(NOHOW/ss*s,FN*s)=>(NOH,OWFN)
-        if self.pad[0]>0 and self.pad[1]>0:
-            return ret[:-self.pad[0],:-self.pad[1]]
-        elif self.pad[0]>0 and self.pad[1]==0:
-            return ret[:-self.pad[0],:]
-        elif self.pad[0]==0 and self.pad[1]>0:
-            return ret[:,:-self.pad[1]]
-        else:
-            return ret
+        return ret[:H*self.s-self.pad[0],:W*self.s-self.pad[1]]
 class Affine:
     def __init__(self,W,b):
         # batch.shape=(N*BH,BW*FN)
@@ -177,7 +170,7 @@ class modelA:
                 row=int(j%OW)
                 dxTmp[col:col+FH,row*C:C*(row+FW)]+=batTmp[j].reshape(FH,-1)
         dx=dx.reshape(N,H+pcol,-1)
-        dx=dx[:,p[0][0]:-p[0][1],C*p[1][0]:-1*C*p[1][1]]
+        dx=dx[:,p[0][0]:H+pcol-p[0][1],C*p[1][0]:WC+C*(prow-p[1][1])]
         return dx.reshape(NH,WC)
 class modelB:
     def __init__(self,BHBWFN,M):
@@ -216,8 +209,8 @@ class modelC:
     def backward(self,N,optimizer,lr=0.01):
         dy=self.y-self.xw
         dx,dw=self.aff.backward(dy,N,lr)
-        optimizer.update(self.aff.W,-1*dw)
-        return -1*dx
+        optimizer.update(self.aff.W,dw)
+        return dx
     def genFilters(self,BHBW,FN):
         ret=np.random.randn(BHBW,FN)*math.sqrt(1/BHBW)
         return ret
