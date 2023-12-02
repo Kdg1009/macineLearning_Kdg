@@ -1,37 +1,68 @@
 import numpy as np
-import cnnLayers_v2 as cnn
+import cnnLayers_v2 as layer
 import imgPreprocess as img
 import optimizer as opt
 import cv2
 from genConvNet import genNet
+import gradCheck
+import pickle as pkl
 if __name__ == '__main__':
-    import sys
-    from os import path
-    print(path.dirname(path.dirname(path.abspath(__file__))))
-    sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
+    import sys,os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from data.mnist import load_mnist
-(x_train, t_train), (x_test,t_test)= \
-    load_mnist(normalize=True,flatten=False,one_hot_label=True)
-train_loss_list=[]
-iters_num=10000
-train_size=x_train.shape[0]
-batch_size=100
-print(x_train.shape)
-""" data=cv2.imread('/project/python_project/carDetect/project/test_set/test_1.labled/1.[[(212, 216), (290, 290)], [(340, 205), (380, 248)], [(100, 197), (142, 231)]].dfec4efae9812bb6db3de0bf9ea8ab96d0a65d3b.jpg')
-data=data.reshape(427,-1)
-A=cnn.modelA(5,7,7,3,3)
-B=cnn.modelB(16685,3)
-C=cnn.modelC(3,5)
-answer=[[0,0,0,0,0],]
-optA=opt.Momentum()
-optB=opt.AdaGrad()
-optC=opt.Adam()
-InfoA=[[(427,1920),7,7,3,3,((1,1),(1,1))],] # dxShape,FH,FW,C,s,p
-singleNet=genNet([A,],B,C)
-for i in range(1000):
-    L=singleNet.forward(answer,data,1,InfoA)
-    print(L)
-    #print('L(',i,'): ',L)
-    if L<0.01:
-        break
-    singleNet.backward(1,[optA],optB,optC,InfoA,0.01) """
+rootDir='/project/python_project/carDetect/project/cnn/'
+try:
+    with open(rootDir+'/pkl/model/modelA.pickle','rb') as fr:
+        A,optA=pkl.load(fr)
+except FileNotFoundError:
+    print('GEN: pkl/model/modelA.pickle')
+    A1=layer.modelA(30,5,5,1,2)
+    A=[A1]
+    optA1=opt.Momentum()
+    optA=[optA1]
+    with open(rootDir+'/pkl/model/modelA.pickle','wb') as fr:
+        pkl.dump([A,optA],fr)
+try:
+    with open(rootDir+'/pkl/model/modelB.pickle','rb') as fr:
+        B,optB=pkl.load(fr)
+except FileNotFoundError:
+    print('GEN: pkl/model/modelB.pickle')
+    B=layer.modelB(12*12*30,100)
+    optB=opt.Momentum()
+    with open(rootDir+'/pkl/model/modelB.pickle','wb') as fr:
+        pkl.dump([B,optB],fr)
+try:
+    with open(rootDir+'/pkl/model/modelC.pickle','rb') as fr:
+        C,optC=pkl.load(fr)
+except FileNotFoundError:
+    print('GEN: pkl/model/modelC.pickle')
+    C=layer.modelC(100,10)
+    optC=opt.Momentum()
+    with open(rootDir+'/pkl/model/modelC.pickle','wb') as fr:
+        pkl.dump([C,optC],fr)
+
+
+(x_train,t_train),(x_test,t_test)=load_mnist(normalize=True,flatten=False,one_hot_label=True)
+""" data=x_train[0].transpose(1,2,0).reshape(28,28)
+answer=t_train[0]
+x=A[0].forward(data,1,5,5,1,1)
+x=B.forward(x,1)
+L=C.forward(answer,x,1)
+
+infoA1=[(28,28),5,5,1,1,((0,0),(0,0))]
+dy=C.backward(1,optC)
+dy=B.backward(dy,1,optB)
+dy=A[0].backward(dy,optA[0],1,infoA1)
+ """
+correct=0
+for i in range(50):
+    data=x_test[i].transpose(1,2,0).reshape(28,28)
+    answer=t_test[i]
+    x=A[0].forward(data,1,5,5,1,1)
+    x=B.forward(x,1)
+    t=C.aff.forward(x,1)
+    t=C.softmax.forward(t)
+    if np.argmax(t)==np.argmax(answer):
+        print(i)
+        correct+=1
+print(correct)

@@ -5,6 +5,7 @@ import pickle as pkl
 import optimizer as opt
 import cv2
 import numpy as np
+import gradCheck
 if __name__ == '__main__':
     import sys
     from os import path
@@ -14,7 +15,7 @@ if __name__ == '__main__':
 (x_train, t_train), (x_test,t_test)= \
     load_mnist(normalize=True,flatten=False,one_hot_label=True) # x_train.shape=(60000,1,28,28)
 train_loss_list=[]
-iters_num=10000
+iters_num=1000
 train_size=x_train.shape[0]
 batch_size=100
 # model structure: data->A->A->A->A->A(with no pool)->B->Affine->Loss
@@ -37,7 +38,7 @@ except FileNotFoundError:
     print('GEN: pkl/model/modelA.pickle')
     A1=layer.modelA(30,5,5,1,2)
     A=[A1]
-    optA1=opt.AdaGrad()
+    optA1=opt.Momentum()
     optA=[optA1]
     with open(rootDir+'/pkl/model/modelA.pickle','wb') as fr:
         pkl.dump([A,optA],fr)
@@ -47,7 +48,7 @@ try:
 except FileNotFoundError:
     print('GEN: pkl/model/modelB.pickle')
     B=layer.modelB(12*12*30,100)
-    optB=opt.AdaGrad()
+    optB=opt.Momentum()
     with open(rootDir+'/pkl/model/modelB.pickle','wb') as fr:
         pkl.dump([B,optB],fr)
 try:
@@ -56,7 +57,7 @@ try:
 except FileNotFoundError:
     print('GEN: pkl/model/modelC.pickle')
     C=layer.modelC(100,10)
-    optC=opt.AdaGrad()
+    optC=opt.Momentum()
     with open(rootDir+'/pkl/model/modelC.pickle','wb') as fr:
         pkl.dump([C,optC],fr)
 neuralNet=genConvNet.genNet(A,B,C)
@@ -65,8 +66,22 @@ infoA=[infoA1]    # dxShape,FH,FW,C,s,p=InfoA
 for i in range(iters_num):
     batchMask=np.random.choice(train_size,batch_size)
     batch=x_train[batchMask].transpose(0,2,3,1)
-    print(batch.shape)
     answer=t_train[batchMask]
     L=neuralNet.forward(answer,batch,batch_size,infoA)
     print('L(',i,'): ',L)
     neuralNet.backward(batch_size,optA,optB,optC,infoA,0.01)
+try:
+    with open(rootDir+'pkl/model/modelA.pickle','wb') as fr:
+        pkl.dump([A,optA],fr)
+except FileNotFoundError:
+    print('error')
+try:
+    with open(rootDir+'pkl/model/modelB.pickle','wb') as fr:
+        pkl.dump([B,optB],fr)
+except FileNotFoundError:
+    print('error')
+try:
+    with open(rootDir+'pkl/model/modelC.pickle','wb') as fr:
+        pkl.dump([C,optC],fr)
+except FileNotFoundError:
+    print('error')

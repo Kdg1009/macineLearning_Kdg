@@ -1,3 +1,5 @@
+from gradCheck import numerical_grad
+
 class genNet:
     def __init__(self,A,B,C):
         self.A=A

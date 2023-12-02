@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 import math
-
+from gradCheck import numerical_grad
 class conv:
     def __init__(self,filter,bias):
         self.F=filter   # F.shape=(C*FH*FW,FN)
@@ -106,10 +106,8 @@ class Affine:
         ret=np.dot(batch.reshape(N,-1),self.W)+self.b
         return ret
     def backward(self,dy,N,learning_rate=0.1):
-        #self.b-=learning_rate*diff_y
         db=np.sum(dy,axis=0)/self.b.shape[1]
         self.b-=learning_rate*db
-        #self.W-=learning_rate*np.dot(self.batch.reshape(N,-1).T,diff_y)
         return np.dot(dy,self.W.T).reshape(self.batch.shape),np.dot(self.batch.reshape(N,-1).T,dy)
 class LossSSE:
     def __init__(self):
@@ -128,6 +126,42 @@ class LossSSE:
         ret=np.repeat(dy,(1,W))
         ret=ret*self.loss
         return ret
+class Softmax:
+    def __init__(self):
+        self.m=None
+        return
+    def forward(self,batch):# batch.shape=(N,M)
+        N=batch.shape[0]
+        m=np.max(batch,axis=1).reshape(N,1)
+        numerator=np.exp(batch-m)
+        denominator=np.sum(numerator,axis=1).reshape(N,1)
+        self.m=denominator
+        return numerator/denominator
+    def backward(self,dy): # dy.shape=(N,M)
+        ret=dy*self.m
+        return ret
+class LossCEE:
+    def __init__(self):
+        self.loss=None
+    def forward(self,t,y):
+        N=t.shape[0]
+        return -np.sum(t*np.log(y+1e-7),axis=1)/N
+def num_grad(f,x):
+    h=1e-4
+    grad=np.zeros_like(x)
+    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        idx = it.multi_index
+        tmp_val = x[idx]
+        x[idx] = float(tmp_val) + h
+        fxh1 = f(x,10)
+        x[idx] = tmp_val - h 
+        fxh2 = f(x,10)
+        grad[idx] = np.max((fxh1 - fxh2) / (2*h))
+    
+        x[idx] = tmp_val # 값 복원
+        it.iternext()
+    return grad
 class modelA:
     def __init__(self,FN,FH,FW,C,pstride):
         filters=self.genFilters(FN,FH,FW,C) # for each channels, F init identical, but by doing gradient descent, execute separately
@@ -185,6 +219,10 @@ class modelB:
     def backward(self,dy,N,optimizer,lr=0.01):
         dy=self.relu.backward(dy)
         dx,dw=self.aff.backward(dy,N,lr)
+        # checking grad validation
+        #grad=num_grad(self.aff.forward,self.aff.batch)
+        #grad_dif=np.sum(np.subtract(dw.reshape(1,-1),grad.reshape(1,-1)))/(grad.shape[0]*grad.shape[1])
+        #print('B: ',grad_dif)
         optimizer.update(self.aff.W,dw)
         return dx
     def genFilters(self,BHBW,FN):
@@ -195,22 +233,47 @@ class modelC:
         filters=self.genFilters(W,M)
         b=np.zeros((1,M))
         self.aff=Affine(filters,b)
-        self.loss=LossSSE()
+        self.softmax=Softmax()
+        self.loss=LossCEE()
         self.y=None
         self.xw=None
         self.x=None
     def forward(self,answer,batch,N):
         tmp=self.aff.forward(batch,N)
-        ret=self.loss.forward(tmp,answer)
+        tmp2=self.softmax.forward(tmp)
+        ret=self.loss.forward(tmp2,answer)
         self.x=batch
         self.y=answer
         self.xw=tmp
+        # checking grad validation
+        #grad=self.grad(tmp2,answer)
         return ret
     def backward(self,N,optimizer,lr=0.01):
-        dy=self.y-self.xw
+        dy=(self.xw-self.y)/N
         dx,dw=self.aff.backward(dy,N,lr)
+        # checking grad validation
+        #grad=num_grad(self.aff.forward,self.x)
+        #grad_dif=np.sum(np.subtract(dw.reshape(1,-1),grad.reshape(1,-1)))/(grad.shape[0]*grad.shape[1])
+        #print('C: ',grad_dif)
         optimizer.update(self.aff.W,dw)
         return dx
     def genFilters(self,BHBW,FN):
         ret=np.random.randn(BHBW,FN)*math.sqrt(1/BHBW)
         return ret
+    def grad(self,t,y):
+        h=1e-4
+        grad=np.zeros_like(t)
+        it = np.nditer(t, flags=['multi_index'], op_flags=['readwrite'])
+        while not it.finished:
+            idx = it.multi_index
+            tmp_val = t[idx]
+            t[idx] = float(tmp_val) + h
+            fxh1 = self.loss.forward(t,y)
+            t[idx] = tmp_val - h 
+            fxh2 = self.loss.forward(t,y)
+            grad[idx] = (fxh1 - fxh2) / (2*h)
+        
+            t[idx] = tmp_val # 값 복원
+            it.iternext()   
+        
+        return grad
