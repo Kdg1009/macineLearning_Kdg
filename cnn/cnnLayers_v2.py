@@ -126,6 +126,22 @@ class LossSSE:
         ret=np.repeat(dy,(1,W))
         ret=ret*self.loss
         return ret
+class softmaxWithLoss:
+    def __init__(self):
+        self.loss=None
+        self.t=None
+        self.y=None
+        self.softmax=Softmax()
+        self.loss=LossCEE()
+    def forward(self,batch,answer):
+        self.y=answer
+        self.t=self.softmax.forward(batch)
+        self.loss=self.loss.forward(self.t,answer)
+        return self.loss
+    def backward(self,dy=1):
+        N=self.t.shape[0]
+        dx=(self.t-self.y)/N
+        return dx
 class Softmax:
     def __init__(self):
         self.m=None
@@ -137,9 +153,6 @@ class Softmax:
         denominator=np.sum(numerator,axis=1).reshape(N,1)
         self.m=denominator
         return numerator/denominator
-    def backward(self,dy): # dy.shape=(N,M)
-        ret=dy*self.m
-        return ret
 class LossCEE:
     def __init__(self):
         self.loss=None
@@ -220,7 +233,7 @@ class modelB:
         dy=self.relu.backward(dy)
         dx,dw=self.aff.backward(dy,N,lr)
         # checking grad validation
-        #grad=num_grad(self.aff.forward,self.aff.batch)
+        grad=num_grad(self.aff.forward,self.aff.W)
         #grad_dif=np.sum(np.subtract(dw.reshape(1,-1),grad.reshape(1,-1)))/(grad.shape[0]*grad.shape[1])
         #print('B: ',grad_dif)
         optimizer.update(self.aff.W,dw)
@@ -249,7 +262,7 @@ class modelC:
         #grad=self.grad(tmp2,answer)
         return ret
     def backward(self,N,optimizer,lr=0.01):
-        dy=(self.xw-self.y)/N
+        dy=(self.xw-self.y)/N # dy.shape=(N,M)
         dx,dw=self.aff.backward(dy,N,lr)
         # checking grad validation
         #grad=num_grad(self.aff.forward,self.x)
