@@ -17,7 +17,7 @@ class conv:
     def backward(self,dy,learning_rate=0.1):
         dy=dy.reshape(-1,self.F.shape[1])           # dy.shape=(NOH,OWFN)=>(NOHOW,FN)
         # ave b
-        db=np.sum(dy,axis=0)/self.b.shape[1]
+        db=np.sum(dy,axis=0)/self.F.shape[1]
         self.b-=learning_rate*db
         # dx,dw
         dx=np.dot(dy,self.F.T) # dx.shape=(NOHOW,CFHFW)
@@ -106,7 +106,7 @@ class Affine:
         ret=np.dot(batch.reshape(N,-1),self.W)+self.b
         return ret
     def backward(self,dy,N,learning_rate=0.1):
-        db=np.sum(dy,axis=0)/self.b.shape[1]
+        db=np.sum(dy,axis=0)/self.W.shape[1]
         self.b-=learning_rate*db
         return np.dot(dy,self.W.T).reshape(self.batch.shape),np.dot(self.batch.reshape(N,-1).T,dy)
 class LossSSE:
@@ -132,11 +132,11 @@ class softmaxWithLoss:
         self.t=None
         self.y=None
         self.softmax=Softmax()
-        self.loss=LossCEE()
+        self.Loss=LossCEE()
     def forward(self,batch,answer):
         self.y=answer
         self.t=self.softmax.forward(batch)
-        self.loss=self.loss.forward(self.t,answer)
+        self.loss=self.Loss.forward(self.t,answer)
         return self.loss
     def backward(self,dy=1):
         N=self.t.shape[0]
@@ -257,7 +257,7 @@ class modelC:
         ret=self.loss.forward(tmp2,answer)
         self.x=batch
         self.y=answer
-        self.xw=tmp
+        self.xw=tmp2
         # checking grad validation
         #grad=self.grad(tmp2,answer)
         return ret
