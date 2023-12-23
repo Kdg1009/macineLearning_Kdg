@@ -276,12 +276,7 @@ class conv_block:
         for layer in self.layers.values():
             x=layer.forward(x)
         return x
-    def backward(self,dy):
-        res=OrderedDict(reversed(list(layers.values())))
-        dx=dy.copy()
-        for layer in res.values():
-            dx=layer.backward(dx)
-        return dx
+
 class Inception:
     def __init__(self,out_1x1,red_3x3,out_3x3,red_5x5,out_5x5,pit_1x1pool):
         self.x1_layers=conv_block(out_1x1)
@@ -292,10 +287,9 @@ class Inception:
         self.x2_layers['out_3x3']=conv_block(out_3x3)
         self.x3_layers['red_5x5']=conv_block(red_5x5)
         self.x3_layers['out_5x5']=conv_block(out_5x5)
-        
-        self.3x3pool=Pool(3,3)
+
+        self.pool_3x3=Pool(3,3)
         self.pit_1x1pool=conv_block(pit_1x1pool)
-        self.filter_concat=None
     def forward(self,x):
         x1=self.x1_layers.forward(x)
         x2=x.copy()
@@ -303,26 +297,8 @@ class Inception:
         for x2_layer,x3_layer in zip(self.x2_layers.values(),self.x3_layers.values()):
             x2=x2_layer.forward(x2)
             x3=x3_layer.forward(x3)
-
-        x4=self.3x3pool.forward(x)
+        x4=self.pool_3x3.forward(x)
         x4=self.pit_1x1pool.forward(x4)
-        self.filter_concat=np.concatenate((x1,x2,x3,x4),axis=0)
-        return self.filter_concat
-    def backward(self,dy):
-        FN1=self.x1_layers.layers['conv'].W.shape[0]
-        FN2=self.x2_layers['out_3x3'].layers['conv'].W.shape[0]
-        FN3=self.x3_layers['out_5x5'].layers['conv'].W.shape[0]
-        FN4=self.pit_1x1pool.layers['conv'].W.shape[0]
 
-        dx1=self.x1_layers.backward(dy[:,:FN1,:,:])
-        out_dx2=self.x2_layers['out_3x3'].backward(dy[:,FN1:FN2,:,:])
-        red_dx2=self.x2_layers['red_3x3'].backward(out_dx2)
-        out_dx3=self.x3_layers['out_5x5'].backward(dy[:,FN2:FN3,:,:])
-        red_dx3=self.x3_layers['red_5x5'].backward(out_dx3)
-        pit_dx4=self.pit_1x1pool.backward(dy)
-        dx4=self.3x3pool.backward(pit_dx4)
-
-        ret=(dx1+red_dx2+red_dx3+dx4)/4
-        return ret
-
-
+        concat=np.concatenate((x1,x2,x3,x4))
+        return concat
