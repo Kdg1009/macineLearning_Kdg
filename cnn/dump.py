@@ -1,10 +1,8 @@
 import numpy as np
+import cnnLayers_v3 as layers
 
-a=[1,2,3]
-b=[4,5,6]
-c=[7,8,9]
-
-def p(a,b,c):
-    return a+b+c
-
-print(p(*a))
+a=np.arange(96).reshape(2,3,4,4)
+da=np.random.rand(2,3,2,2)
+ap=layers.AvePool(2,2,2,0)
+print(ap.forward(a))
+print(ap.backward(da))

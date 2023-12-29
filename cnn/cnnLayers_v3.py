@@ -265,7 +265,38 @@ class Pool:
         dcol=dmax.reshape(dmax.shape[0]*dmax.shape[1]*dmax.shape[2] , -1)
         dx=col2im(dcol,self.x.shape,self.pool_h,self.pool_w,self.s,self.p)
         return dx
+class AvePool:
+    def __init__(self,pool_h,pool_w,s=1,p=0):
+        self.pool_h=pool_h
+        self.pool_w=pool_w
+        self.s=s
+        self.p=p
+        self.x=None
+    def forward(self,x):
+        N,C,H,W=x.shape
+        OH=int(1+(H-self.pool_h)/self.s)
+        OW=int(1+(W-self.pool_w)/self.s)
+
+        col=im2col(x,self.pool_h,self.pool_w,self.s,self.p)
+        col=col.reshape(-1,self.pool_h*self.pool_w)
+        # ave pool
+        out=np.mean(col,axis=1)
+        out=out.reshape(N,OH,OW,C).transpose(0,3,1,2)
+        self.x=x
+        return out
+    def backward(self,dy):
+        dy=dy.transpose(0,2,3,1)
+        # reverse average pooling
+        pool_size=self.pool_h*self.pool_w
+        dave=np.zeros((pool_size,dy.size))
+        dave+=(1/pool_size)*dy.flatten()
+        dave=dave.T.reshape(dy.shape+(pool_size,))
+
+        dcol=dave.reshape(dave.shape[0]*dave.shape[1]*dave.shape[2],-1)
+        dx=col2im(dcol,self.x.shape,self.pool_h,self.pool_w,self.s,self.p)
+        return dx
 from collections import OrderedDict
+from googleNet import Conv2d
 class conv_block:
     def __init__(self,convInfo):
         self.layers=OrderedDict()
@@ -277,28 +308,3 @@ class conv_block:
             x=layer.forward(x)
         return x
 
-class Inception:
-    def __init__(self,out_1x1,red_3x3,out_3x3,red_5x5,out_5x5,pit_1x1pool):
-        self.x1_layers=conv_block(out_1x1)
-        self.x2_layers=OrderedDict()
-        self.x3_layers=OrderedDict()
-
-        self.x2_layers['red_3x3']=conv_block(red_3x3)
-        self.x2_layers['out_3x3']=conv_block(out_3x3)
-        self.x3_layers['red_5x5']=conv_block(red_5x5)
-        self.x3_layers['out_5x5']=conv_block(out_5x5)
-
-        self.pool_3x3=Pool(3,3)
-        self.pit_1x1pool=conv_block(pit_1x1pool)
-    def forward(self,x):
-        x1=self.x1_layers.forward(x)
-        x2=x.copy()
-        x3=x.copy()
-        for x2_layer,x3_layer in zip(self.x2_layers.values(),self.x3_layers.values()):
-            x2=x2_layer.forward(x2)
-            x3=x3_layer.forward(x3)
-        x4=self.pool_3x3.forward(x)
-        x4=self.pit_1x1pool.forward(x4)
-
-        concat=np.concatenate((x1,x2,x3,x4))
-        return concat
